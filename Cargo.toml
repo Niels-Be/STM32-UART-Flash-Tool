@@ -1,0 +1,15 @@
+[package]
+name = "stm32-firmware-loader"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "stm32_firmware_loader"
+path = "src/lib.rs"
+
+[dependencies]
+clap = "^3"
+parse_int = "0.6.0"
+serialport = "^3"
