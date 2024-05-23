@@ -418,8 +418,8 @@ pub fn flash_file<T: Read + Write>(port: &mut T, file: &str, address: u32) -> Re
     let mut data = Vec::new();
     file.read_to_end(&mut data)?;
     const PAGE_SIZE: u32 = 0x800;
-    let num_pages = (data.len() as f32 / PAGE_SIZE as f32).ceil() as u8;
-    let page_offset = (address % PAGE_SIZE) as u8;
+    let _num_pages = (data.len() as f32 / PAGE_SIZE as f32).ceil() as u8;
+    let _page_offset = (address % PAGE_SIZE) as u8;
     // TODO: always erase block 0 and 1 ???
     extended_erase(port, &[0,1])?;
 

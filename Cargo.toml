@@ -11,5 +11,6 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = "^3"
+gpio-cdev = "0.6.0"
 parse_int = "0.6.0"
 serialport = "^3"
