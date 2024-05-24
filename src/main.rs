@@ -16,7 +16,7 @@ fn main() {
                 .value_name("PORT")
                 .help("Sets the serial port to use")
                 .takes_value(true)
-                .default_value("/dev/ttyUSB0"),
+                .default_value("/dev/ttyHS1"),
         )
         .arg(
             Arg::with_name("baudrate")
@@ -32,7 +32,7 @@ fn main() {
                 .short('B')
                 .long("boot-pin")
                 .value_name("BOOT_PIN")
-                .help("Toggles the boot gpio pin")
+                .help("Toggles the boot gpio pin. 0 to disable")
                 .takes_value(true)
                 .default_value("9"),
         )
@@ -41,7 +41,7 @@ fn main() {
                 .short('R')
                 .long("reset-pin")
                 .value_name("RESET_PIN")
-                .help("Toggles the reset gpio pin")
+                .help("Toggles the reset gpio pin. 0 to disable")
                 .takes_value(true)
                 .default_value("8"),
         )
@@ -72,7 +72,10 @@ fn main() {
                 .arg(Arg::with_name("file").required(true))
                 .arg(Arg::with_name("address").default_value("0x08000000")),
         )
-        .settings(&[clap::AppSettings::ArgRequiredElseHelp, clap::AppSettings::SubcommandRequiredElseHelp])
+        .settings(&[
+            clap::AppSettings::ArgRequiredElseHelp,
+            clap::AppSettings::SubcommandRequiredElseHelp,
+        ])
         .get_matches();
 
     let port_name = matches.value_of("port").expect("missing port");
@@ -88,17 +91,6 @@ fn main() {
         .value_of("reset-pin")
         .map(|x| x.parse().expect("invalid reset pin"));
 
-    let s = SerialPortSettings {
-        baud_rate,
-        data_bits: DataBits::Eight,
-        parity: Parity::Even,
-        stop_bits: StopBits::One,
-        flow_control: FlowControl::None,
-        timeout: Duration::from_secs(1),
-    };
-
-    let mut port = serialport::open_with_settings(port_name, &s).expect("Failed to open port");
-
     let mut gpio_boot = None;
     let mut gpio_reset = None;
     if boot_pin.is_some() || reset_pin.is_some() {
@@ -108,38 +100,39 @@ fn main() {
         // println!("Detected {} lines", chip.num_lines());
 
         if let Some(boot_pin) = boot_pin {
-            println!("Setting boot pin {}", boot_pin);
-            let boot = chip
-                .get_line(boot_pin)
-                .expect("Failed to request boot pin")
-                .request(LineRequestFlags::OUTPUT, 0, "boot")
-                .expect("Failed to request boot pin");
-            boot.set_value(1).expect("Failed to set boot pin");
-            std::thread::sleep(Duration::from_millis(100));
-            gpio_boot = Some(boot);
+            if boot_pin != 0 {
+                println!("Setting boot pin {}", boot_pin);
+                let boot = chip
+                    .get_line(boot_pin)
+                    .expect("Failed to request boot pin")
+                    .request(LineRequestFlags::OUTPUT, 1, "stm32flash")
+                    .expect("Failed to request boot pin");
+                boot.set_value(1).expect("Failed to set boot pin");
+                std::thread::sleep(Duration::from_millis(100));
+                gpio_boot = Some(boot);
+            }
         }
         if let Some(reset_pin) = reset_pin {
-            println!("Toggling reset pin {}", reset_pin);
-            let reset = chip
-                .get_line(reset_pin)
-                .expect("Failed to request reset pin")
-                .request(LineRequestFlags::OUTPUT, 0, "reset")
-                .expect("Failed to request reset pin");
-            reset.set_value(1).expect("Failed to set reset pin");
-            std::thread::sleep(Duration::from_millis(500));
-            reset.set_value(0).expect("Failed to reset reset pin");
-            gpio_reset = Some(reset);
+            if reset_pin != 0 {
+                println!("Toggling reset pin {}", reset_pin);
+                let reset = chip
+                    .get_line(reset_pin)
+                    .expect("Failed to request reset pin")
+                    .request(LineRequestFlags::OUTPUT, 0, "stm32flash")
+                    .expect("Failed to request reset pin");
+                std::thread::sleep(Duration::from_millis(100));
+                reset.set_value(1).expect("Failed to set reset pin");
+                std::thread::sleep(Duration::from_millis(100));
+                reset.set_value(0).expect("Failed to reset reset pin");
+                std::thread::sleep(Duration::from_millis(100));
+                gpio_reset = Some(reset);
+            }
         }
     }
 
-    println!("Connecting on {}", port_name);
-    for _ in 0..10 {
-        if let Ok(_) = hello(&mut port) {
-            println!("Connected on {}", port_name);
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    println!("Connecting on {} {}", port_name, baud_rate);
+    let mut port = connect_port(port_name, baud_rate).expect("Failed to connect");
+    println!("Connected on {}", port_name);
 
     if let Some(gpio_boot) = gpio_boot {
         println!("Resetting boot pin");
@@ -201,4 +194,29 @@ fn main() {
         }
         _ => (),
     }
+}
+
+fn connect_port(port_name: &str, baud_rate: u32) -> Result<Box<dyn SerialPort>, std::io::Error> {
+    let s = SerialPortSettings {
+        baud_rate,
+        data_bits: DataBits::Eight,
+        parity: Parity::Even,
+        stop_bits: StopBits::One,
+        flow_control: FlowControl::None,
+        timeout: Duration::from_secs(1),
+    };
+
+    let mut port = serialport::open_with_settings(port_name, &s).expect("Failed to open port");
+
+    let mut last_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "Failed to connect");
+    for _ in 0..10 {
+        if let Err(e) = hello(&mut port) {
+            last_err = e;
+        } else {
+            port.set_timeout(Duration::from_secs(30))?;
+            return Ok(port);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(last_err)
 }
