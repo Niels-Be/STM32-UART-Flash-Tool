@@ -465,7 +465,13 @@ pub fn flash_file<T: Read + Write>(port: &mut T, file: &str, address: u32) -> Re
     let _num_pages = (data.len() as f32 / PAGE_SIZE as f32).ceil() as u8;
     let _page_offset = (address % PAGE_SIZE) as u8;
     // TODO: always erase block 0 and 1 ???
-    extended_erase(port, &[0,1])?;
+    // extended_erase(port, &[0, 1])?;
+    // if let Err(e) = extended_erase_special(port, SpecialEraseType::MassErase) {
+    //     println!("Failed to erase memory: {:?}", e);
+    // }
+    // erase_memory(port, &[0,1])?;
+    // erase_memory_global(port)?;
+
 
     write_memory(port, address, &data)?;
 

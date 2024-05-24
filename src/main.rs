@@ -67,6 +67,7 @@ fn main() {
                 .arg(Arg::with_name("count").required(true)),
         )
         .subcommand(SubCommand::with_name("erase_memory_global"))
+        .subcommand(SubCommand::with_name("erase_ext_all"))
         .subcommand(
             SubCommand::with_name("flash")
                 .arg(Arg::with_name("file").required(true))
@@ -141,58 +142,61 @@ fn main() {
 
     match matches.subcommand() {
         Some(("get", _)) => {
-            let res = get(&mut port).unwrap();
+            let res = get(&mut port);
             println!("Get: {:?}", res);
         }
         Some(("get_version", _)) => {
-            let res = get_version(&mut port).unwrap();
+            let res = get_version(&mut port);
             println!("Version: {:?}", res);
         }
         Some(("get_id", _)) => {
-            let res = get_id(&mut port).unwrap();
+            let res = get_id(&mut port);
             println!("ID: {:?}", res);
         }
         Some(("read_memory", sub_m)) => {
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
             let size = sub_m.value_of("size").unwrap().parse().unwrap();
-            let res = read_memory(&mut port, address, size).unwrap();
+            let res = read_memory(&mut port, address, size);
             println!("Memory: {:?}", res);
         }
         Some(("go", sub_m)) => {
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
-            let res = go(&mut port, address).unwrap();
+            let res = go(&mut port, address);
             println!("Go: {:?}", res);
         }
         Some(("write_memory", sub_m)) => {
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
             let data = sub_m.value_of("data").unwrap().as_bytes().to_vec();
-            let res = write_memory(&mut port, address, &data).unwrap();
+            let res = write_memory(&mut port, address, &data);
             println!("Write: {:?}", res);
         }
         Some(("erase_memory", sub_m)) => {
             let page: u8 = sub_m.value_of("page").unwrap().parse().unwrap();
             let count: u8 = sub_m.value_of("count").unwrap().parse().unwrap();
-            let res = erase_memory(&mut port, &(page..page + count).collect::<Vec<u8>>()).unwrap();
+            let res = erase_memory(&mut port, &(page..page + count).collect::<Vec<u8>>());
             println!("Erase: {:?}", res);
         }
         Some(("erase_memory_global", _)) => {
-            let res = erase_memory_global(&mut port).unwrap();
+            let res = erase_memory_global(&mut port);
             println!("Erase global: {:?}", res);
+        }
+        Some(("erase_ext_all", _)) => {
+            let res = extended_erase_special(&mut port, SpecialEraseType::MassErase);
+            println!("Erase ext all: {:?}", res);
         }
         Some(("flash", sub_m)) => {
             let file = sub_m.value_of("file").unwrap();
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
-            let res = flash_file(&mut port, file, address).unwrap();
+            let res = flash_file(&mut port, file, address);
             println!("Flash: {:?}", res);
-
-            if let Some(gpio_reset) = gpio_reset {
-                println!("Toggling reset pin");
-                gpio_reset.set_value(1).expect("Failed to set reset pin");
-                std::thread::sleep(Duration::from_millis(100));
-                gpio_reset.set_value(0).expect("Failed to reset reset pin");
-            }
         }
         _ => (),
+    }
+    if let Some(gpio_reset) = gpio_reset {
+        println!("Toggling reset pin");
+        gpio_reset.set_value(1).expect("Failed to set reset pin");
+        std::thread::sleep(Duration::from_millis(100));
+        gpio_reset.set_value(0).expect("Failed to reset reset pin");
     }
 }
 
