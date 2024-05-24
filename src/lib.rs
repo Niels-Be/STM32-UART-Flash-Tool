@@ -10,6 +10,7 @@ const READ_MEMORY_COMMAND: [u8; 2] = [0x11, 0xEE];
 const GO_COMMAND: [u8; 2] = [0x21, 0xDE];
 const WRITE_MEMORY_COMMAND: [u8; 2] = [0x31, 0xCE];
 const ERASE_MEMORY_COMMAND: [u8; 2] = [0x43, 0xBC];
+const EXTENDED_ERASE_MEMORY_COMMAND: [u8; 2] = [0x44, 0xBB];
 
 const ACK: u8 = 0x79;
 #[allow(dead_code)]
@@ -366,13 +367,7 @@ pub fn erase_memory_global<T: Read + Write>(port: &mut T) -> Result<(), Error> {
 
 pub fn extended_erase<T: Read + Write>(port: &mut T, pages: &[u16]) -> Result<(), Error> {
     // Command code for "Extended Erase" is 0x44
-    let erase_command: [u8; 1] = [0x44];
-    // Complement of the command code
-    let erase_command_complement: [u8; 1] = [0xBB];
-
-    // Send the "Extended Erase" command
-    port.write(&erase_command)?;
-    port.write(&erase_command_complement)?;
+    port.write(&EXTENDED_ERASE_MEMORY_COMMAND)?;
 
     // Wait for ACK
     let mut ack: [u8; 1] = [0];
@@ -387,7 +382,7 @@ pub fn extended_erase<T: Read + Write>(port: &mut T, pages: &[u16]) -> Result<()
 
     let mut bytes_to_send = Vec::<u8>::new();
     // Send the number of pages to erase
-    bytes_to_send.extend_from_slice(&(pages.len() as u16 - 1).to_be_bytes());
+    bytes_to_send.extend_from_slice(&(pages.len() as u16).to_be_bytes());
 
     // Send the page numbers to erase
     for page in pages {
@@ -397,10 +392,59 @@ pub fn extended_erase<T: Read + Write>(port: &mut T, pages: &[u16]) -> Result<()
     let checksum = bytes_to_send.iter().fold(0, |acc, &x| acc ^ x);
     bytes_to_send.push(checksum);
 
-    // println!("bytes_to_send: {:?}", bytes_to_send);
     port.write(&bytes_to_send)?;
 
     // Wait for ACK
+    println!("wait for erase complete");
+    port.read(&mut ack)?;
+
+    if ack[0] != ACK {
+        return Err(Error::new(
+            ErrorKind::Other,
+            "Did not receive ACK after erase sectors",
+        ));
+    }
+
+    Ok(())
+}
+
+#[repr(u16)]
+pub enum SpecialEraseType {
+    MassErase = 0xFFFF,
+    Bank1Erase = 0xFFFE,
+    Bank2Erase = 0xFFFD,
+}
+
+pub fn extended_erase_special<T: Read + Write>(
+    port: &mut T,
+    cmd: SpecialEraseType,
+) -> Result<(), Error> {
+    // Send the "Extended Erase" command
+    port.write(&EXTENDED_ERASE_MEMORY_COMMAND)?;
+
+    // Wait for ACK
+    let mut ack: [u8; 1] = [0];
+    port.read(&mut ack)?;
+
+    if ack[0] != ACK {
+        return Err(Error::new(
+            ErrorKind::Other,
+            "Did not receive ACK after Extended Erase Memory command",
+        ));
+    }
+
+    let mut bytes_to_send = Vec::<u8>::new();
+    // Send the number of pages to erase
+    bytes_to_send.extend_from_slice(&(cmd as u16).to_be_bytes());
+
+    // Calculate the checksum
+    let checksum = bytes_to_send.iter().fold(0, |acc, &x| acc ^ x);
+    bytes_to_send.push(checksum);
+
+    port.write(&bytes_to_send)?;
+
+    // Wait for ACK
+    println!("wait for erase complete");
     port.read(&mut ack)?;
 
     if ack[0] != ACK {
