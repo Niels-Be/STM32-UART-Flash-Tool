@@ -1,4 +1,5 @@
 use clap::{App, Arg, SubCommand};
+use gpio_cdev::LineHandle;
 use parse_int::parse;
 use serialport::prelude::*;
 use std::time::Duration;
@@ -69,10 +70,16 @@ fn main() {
         .subcommand(SubCommand::with_name("erase_memory_global"))
         .subcommand(SubCommand::with_name("erase_ext_all"))
         .subcommand(
+            SubCommand::with_name("write_file")
+                .arg(Arg::with_name("file").required(true))
+                .arg(Arg::with_name("address").default_value("0x08000000")),
+        )
+        .subcommand(
             SubCommand::with_name("flash")
                 .arg(Arg::with_name("file").required(true))
                 .arg(Arg::with_name("address").default_value("0x08000000")),
         )
+        .subcommand(SubCommand::with_name("reset"))
         .settings(&[
             clap::AppSettings::ArgRequiredElseHelp,
             clap::AppSettings::SubcommandRequiredElseHelp,
@@ -135,11 +142,6 @@ fn main() {
     let mut port = connect_port(port_name, baud_rate).expect("Failed to connect");
     println!("Connected on {}", port_name);
 
-    if let Some(gpio_boot) = gpio_boot {
-        println!("Resetting boot pin");
-        gpio_boot.set_value(0).expect("Failed to reset boot pin");
-    }
-
     match matches.subcommand() {
         Some(("get", _)) => {
             let res = get(&mut port);
@@ -184,23 +186,60 @@ fn main() {
             let res = extended_erase_special(&mut port, SpecialEraseType::MassErase);
             println!("Erase ext all: {:?}", res);
         }
-        Some(("flash", sub_m)) => {
+        Some(("write_file", sub_m)) => {
             let file = sub_m.value_of("file").unwrap();
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
             let res = flash_file(&mut port, file, address);
             println!("Flash: {:?}", res);
         }
+        Some(("flash", sub_m)) => {
+            let file = sub_m.value_of("file").unwrap();
+            let address = parse(sub_m.value_of("address").unwrap()).unwrap();
+
+            // Note: this might time out for some reason, it does succeed anyway
+            let res = extended_erase_special(&mut port, SpecialEraseType::MassErase);
+            if let Err(_) = res {
+                println!("Reconnect after erase");
+                // close current port
+                drop(port);
+
+                toggle_reset(&mut gpio_reset);
+                port = connect_port(port_name, baud_rate).expect("Failed to connect");
+                hello(&mut port).expect("Failed to reconnect");
+            }
+
+            println!("Flashing {} at {}", file, address);
+            let res = flash_file(&mut port, file, address);
+            println!("Flash: {:?}", res);
+        }
+        Some(("reset", _)) => {
+            // nothing to do
+        }
         _ => (),
     }
+
+    if let Some(gpio_boot) = &mut gpio_boot {
+        println!("Resetting boot pin");
+        gpio_boot.set_value(0).expect("Failed to reset boot pin");
+    }
+
+    toggle_reset(&mut gpio_reset);
+}
+
+fn toggle_reset(gpio_reset: &mut Option<LineHandle>) {
     if let Some(gpio_reset) = gpio_reset {
         println!("Toggling reset pin");
         gpio_reset.set_value(1).expect("Failed to set reset pin");
         std::thread::sleep(Duration::from_millis(100));
         gpio_reset.set_value(0).expect("Failed to reset reset pin");
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
-fn connect_port(port_name: &str, baud_rate: u32) -> Result<Box<dyn SerialPort>, std::io::Error> {
+fn connect_port(
+    port_name: &str,
+    baud_rate: u32,
+) -> Result<Box<dyn serialport::SerialPort>, std::io::Error> {
     let s = SerialPortSettings {
         baud_rate,
         data_bits: DataBits::Eight,
@@ -210,7 +249,8 @@ fn connect_port(port_name: &str, baud_rate: u32) -> Result<Box<dyn SerialPort>, 
         timeout: Duration::from_secs(1),
     };
 
-    let mut port = serialport::open_with_settings(port_name, &s).expect("Failed to open port");
+    // let mut port = serialport::posix::TTYPort::open(std::path::Path::new(port_name), &s)?;
+    let mut port = serialport::open_with_settings(port_name, &s)?;
 
     let mut last_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "Failed to connect");
     for _ in 0..10 {
