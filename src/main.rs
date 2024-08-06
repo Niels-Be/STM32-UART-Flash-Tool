@@ -205,7 +205,6 @@ fn main() {
 
                 toggle_reset(&mut gpio_reset);
                 port = connect_port(port_name, baud_rate).expect("Failed to connect");
-                hello(&mut port).expect("Failed to reconnect");
             }
 
             println!("Flashing {} at {}", file, address);
