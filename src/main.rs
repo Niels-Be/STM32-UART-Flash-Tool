@@ -1,8 +1,7 @@
 use clap::{App, Arg, SubCommand};
-use gpio_cdev::LineHandle;
 use parse_int::parse;
-use serialport::prelude::*;
 use std::time::Duration;
+use stm32_firmware_loader::helper::{connect_port, toggle_reset, GpioPin};
 use stm32_firmware_loader::*;
 
 fn main() {
@@ -105,7 +104,7 @@ fn main() {
         if let Some(boot_pin) = boot_pin {
             if boot_pin != 0 {
                 println!("Setting boot pin {}", boot_pin);
-                let boot = GpioPin::new(boot_pin).expect("Failed to request boot pin");
+                let mut boot = GpioPin::new(boot_pin).expect("Failed to request boot pin");
                 boot.set_value(1).expect("Failed to set boot pin");
                 std::thread::sleep(Duration::from_millis(100));
                 gpio_boot = Some(boot);
@@ -114,12 +113,9 @@ fn main() {
         if let Some(reset_pin) = reset_pin {
             if reset_pin != 0 {
                 println!("Toggling reset pin {}", reset_pin);
-                let reset = GpioPin::new(reset_pin).expect("Failed to request reset pin");
+                let mut reset = GpioPin::new(reset_pin).expect("Failed to request reset pin");
                 std::thread::sleep(Duration::from_millis(100));
-                reset.set_value(1).expect("Failed to set reset pin");
-                std::thread::sleep(Duration::from_millis(100));
-                reset.set_value(0).expect("Failed to reset reset pin");
-                std::thread::sleep(Duration::from_millis(100));
+                toggle_reset(&mut reset).expect("Failed to toggle reset pin");
                 gpio_reset = Some(reset);
             }
         }
@@ -131,7 +127,7 @@ fn main() {
             gpio_boot.set_value(0).expect("Failed to reset boot pin");
         }
 
-        toggle_reset(&mut gpio_reset);
+        toggle_reset_opt(&mut gpio_reset);
         return;
     }
 
@@ -200,7 +196,7 @@ fn main() {
                 // close current port
                 drop(port);
 
-                toggle_reset(&mut gpio_reset);
+                toggle_reset_opt(&mut gpio_reset);
                 port = connect_port(port_name, baud_rate).expect("Failed to connect");
             }
 
@@ -219,76 +215,11 @@ fn main() {
         gpio_boot.set_value(0).expect("Failed to reset boot pin");
     }
 
-    toggle_reset(&mut gpio_reset);
+    toggle_reset_opt(&mut gpio_reset);
 }
 
-fn toggle_reset(gpio_reset: &mut Option<GpioPin>) {
+fn toggle_reset_opt(gpio_reset: &mut Option<GpioPin>) {
     if let Some(gpio_reset) = gpio_reset {
-        println!("Toggling reset pin");
-        gpio_reset.set_value(1).expect("Failed to set reset pin");
-        std::thread::sleep(Duration::from_millis(100));
-        gpio_reset.set_value(0).expect("Failed to reset reset pin");
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn connect_port(
-    port_name: &str,
-    baud_rate: u32,
-) -> Result<Box<dyn serialport::SerialPort>, std::io::Error> {
-    let s = SerialPortSettings {
-        baud_rate,
-        data_bits: DataBits::Eight,
-        parity: Parity::Even,
-        stop_bits: StopBits::One,
-        flow_control: FlowControl::None,
-        timeout: Duration::from_secs(1),
-    };
-
-    // let mut port = serialport::posix::TTYPort::open(std::path::Path::new(port_name), &s)?;
-    let mut port = serialport::open_with_settings(port_name, &s)?;
-
-    let mut last_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "Failed to connect");
-    for _ in 0..10 {
-        if let Err(e) = hello(&mut port) {
-            last_err = e;
-        } else {
-            port.set_timeout(Duration::from_secs(20))?;
-            return Ok(port);
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Err(last_err)
-}
-
-enum GpioPin {
-    Gpiod(LineHandle),
-    Sysfs(u32),
-}
-
-impl GpioPin {
-    pub fn new(pin: u32) -> Result<Self, gpio_cdev::Error> {
-        use gpio_cdev::Chip;
-        use gpio_cdev::LineRequestFlags;
-        // check if pin is already exported
-        if std::path::Path::new(&format!("/sys/class/gpio/gpio{}", pin)).exists() {
-            return Ok(GpioPin::Sysfs(pin));
-        }
-        let mut chip = Chip::new("/dev/gpiochip0")?;
-
-        let handle = chip
-            .get_line(pin)?
-            .request(LineRequestFlags::OUTPUT, 1, "stm32flash")?;
-        Ok(GpioPin::Gpiod(handle))
-    }
-
-    pub fn set_value(&self, value: u8) -> Result<(), gpio_cdev::Error> {
-        match self {
-            GpioPin::Gpiod(handle) => handle.set_value(value),
-            GpioPin::Sysfs(pin) => Ok(std::fs::write(
-                format!("/sys/class/gpio/gpio{}/value", pin),
-                format!("{}", value),
-            )?),
-        }
+        toggle_reset(gpio_reset).expect("Failed to toggle reset pin");
     }
 }

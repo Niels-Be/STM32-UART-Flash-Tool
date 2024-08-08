@@ -1,3 +1,5 @@
+pub mod helper;
+
 // https://www.st.com/resource/en/application_note/an3155-usart-protocol-used-in-the-stm32-bootloader-stmicroelectronics.pdf
 use std::io::prelude::*;
 use std::io::Error;
@@ -31,7 +33,7 @@ pub fn hello<T: Read + Write>(port: &mut T) -> Result<(), Error> {
             "Did not receive ACK after Hello byte",
         ));
     }
-    println!("got ack after hello byte");
+    log::debug!("got ack after hello byte");
 
     Ok(())
 }
@@ -40,7 +42,7 @@ pub fn get<T: Read + Write>(port: &mut T) -> Result<Vec<u8>, Error> {
     // Send "Get" command
     port.write(&GET_COMMAND)?;
 
-    println!("GET_COMMAND: {:?}", GET_COMMAND);
+    log::trace!("GET_COMMAND: {:?}", GET_COMMAND);
 
     // Wait for ACK
     let mut response = [0; 1];
@@ -52,13 +54,13 @@ pub fn get<T: Read + Write>(port: &mut T) -> Result<Vec<u8>, Error> {
         ));
     }
 
-    println!("read");
+    log::trace!("read");
 
     // Read number of bytes to follow
     port.read(&mut response)?;
     let num_bytes = response[0] as usize;
 
-    println!("num_bytes: {}", num_bytes);
+    log::trace!("num_bytes: {}", num_bytes);
 
     // Read data bytes
     let mut data = vec![0; num_bytes];
@@ -254,7 +256,7 @@ pub fn write_memory_block<T: Read + Write>(
     buf.extend_from_slice(&address.to_be_bytes());
     let checksum = buf.iter().fold(0, |acc, &x| acc ^ x);
     buf.push(checksum);
-    // println!("address: {:?}", buf);
+    // log::trace!("address: {:?}", buf);
     port.write(&buf)?;
 
     // Wait for ACK
@@ -289,7 +291,7 @@ pub fn write_memory<T: Read + Write>(port: &mut T, address: u32, data: &[u8]) ->
     let mut offset = 0;
     while offset < data.len() {
         let block_size = std::cmp::min(data.len() - offset, 256);
-        println!("write to block: {:#x}", address + offset as u32);
+        log::debug!("write to block: {:#x}", address + offset as u32);
         write_memory_block(
             port,
             address + offset as u32,
@@ -395,7 +397,7 @@ pub fn extended_erase<T: Read + Write>(port: &mut T, pages: &[u16]) -> Result<()
     port.write(&bytes_to_send)?;
 
     // Wait for ACK
-    println!("wait for erase complete");
+    log::debug!("wait for erase complete");
     port.read(&mut ack)?;
 
     if ack[0] != ACK {
@@ -444,7 +446,7 @@ pub fn extended_erase_special<T: Read + Write>(
     port.write(&bytes_to_send)?;
 
     // Wait for ACK
-    println!("wait for erase complete");
+    log::debug!("wait for erase complete");
     port.read(&mut ack)?;
 
     if ack[0] != ACK {
@@ -467,11 +469,10 @@ pub fn flash_file<T: Read + Write>(port: &mut T, file: &str, address: u32) -> Re
     // TODO: always erase block 0 and 1 ???
     // extended_erase(port, &[0, 1])?;
     // if let Err(e) = extended_erase_special(port, SpecialEraseType::MassErase) {
-    //     println!("Failed to erase memory: {:?}", e);
+    //     log::warn!("Failed to erase memory: {:?}", e);
     // }
     // erase_memory(port, &[0,1])?;
     // erase_memory_global(port)?;
-
 
     write_memory(port, address, &data)?;
 
