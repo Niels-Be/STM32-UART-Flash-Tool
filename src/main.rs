@@ -185,8 +185,8 @@ fn main() {
 
             // Note: this might time out for some reason, it does succeed anyway
             let res = extended_erase_special(&mut port, SpecialEraseType::MassErase);
-            if let Err(_) = res {
-                println!("Reconnect after erase");
+            if let Err(e) = res {
+                println!("Reconnect after erase: {:?}", e);
                 // close current port
                 drop(port);
 
@@ -243,7 +243,7 @@ fn connect_port(
         if let Err(e) = hello(&mut port) {
             last_err = e;
         } else {
-            port.set_timeout(Duration::from_secs(30))?;
+            port.set_timeout(Duration::from_secs(20))?;
             return Ok(port);
         }
         std::thread::sleep(Duration::from_millis(100));
