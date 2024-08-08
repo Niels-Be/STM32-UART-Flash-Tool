@@ -125,6 +125,16 @@ fn main() {
         }
     }
 
+    if let Some("reset") = matches.subcommand_name() {
+        if let Some(gpio_boot) = &mut gpio_boot {
+            println!("Resetting boot pin");
+            gpio_boot.set_value(0).expect("Failed to reset boot pin");
+        }
+
+        toggle_reset(&mut gpio_reset);
+        return;
+    }
+
     println!("Connecting on {} {}", port_name, baud_rate);
     let mut port = connect_port(port_name, baud_rate).expect("Failed to connect");
     println!("Connected on {}", port_name);
