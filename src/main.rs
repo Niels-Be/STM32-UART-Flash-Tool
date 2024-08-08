@@ -102,19 +102,10 @@ fn main() {
     let mut gpio_boot = None;
     let mut gpio_reset = None;
     if boot_pin.is_some() || reset_pin.is_some() {
-        use gpio_cdev::Chip;
-        use gpio_cdev::LineRequestFlags;
-        let mut chip = Chip::new("/dev/gpiochip0").expect("Failed to open gpio chip");
-        // println!("Detected {} lines", chip.num_lines());
-
         if let Some(boot_pin) = boot_pin {
             if boot_pin != 0 {
                 println!("Setting boot pin {}", boot_pin);
-                let boot = chip
-                    .get_line(boot_pin)
-                    .expect("Failed to request boot pin")
-                    .request(LineRequestFlags::OUTPUT, 1, "stm32flash")
-                    .expect("Failed to request boot pin");
+                let boot = GpioPin::new(boot_pin).expect("Failed to request boot pin");
                 boot.set_value(1).expect("Failed to set boot pin");
                 std::thread::sleep(Duration::from_millis(100));
                 gpio_boot = Some(boot);
@@ -123,11 +114,7 @@ fn main() {
         if let Some(reset_pin) = reset_pin {
             if reset_pin != 0 {
                 println!("Toggling reset pin {}", reset_pin);
-                let reset = chip
-                    .get_line(reset_pin)
-                    .expect("Failed to request reset pin")
-                    .request(LineRequestFlags::OUTPUT, 0, "stm32flash")
-                    .expect("Failed to request reset pin");
+                let reset = GpioPin::new(reset_pin).expect("Failed to request reset pin");
                 std::thread::sleep(Duration::from_millis(100));
                 reset.set_value(1).expect("Failed to set reset pin");
                 std::thread::sleep(Duration::from_millis(100));
@@ -225,7 +212,7 @@ fn main() {
     toggle_reset(&mut gpio_reset);
 }
 
-fn toggle_reset(gpio_reset: &mut Option<LineHandle>) {
+fn toggle_reset(gpio_reset: &mut Option<GpioPin>) {
     if let Some(gpio_reset) = gpio_reset {
         println!("Toggling reset pin");
         gpio_reset.set_value(1).expect("Failed to set reset pin");
@@ -262,4 +249,36 @@ fn connect_port(
         std::thread::sleep(Duration::from_millis(100));
     }
     Err(last_err)
+}
+
+enum GpioPin {
+    Gpiod(LineHandle),
+    Sysfs(u32),
+}
+
+impl GpioPin {
+    pub fn new(pin: u32) -> Result<Self, gpio_cdev::Error> {
+        use gpio_cdev::Chip;
+        use gpio_cdev::LineRequestFlags;
+        // check if pin is already exported
+        if std::path::Path::new(&format!("/sys/class/gpio/gpio{}", pin)).exists() {
+            return Ok(GpioPin::Sysfs(pin));
+        }
+        let mut chip = Chip::new("/dev/gpiochip0")?;
+
+        let handle = chip
+            .get_line(pin)?
+            .request(LineRequestFlags::OUTPUT, 1, "stm32flash")?;
+        Ok(GpioPin::Gpiod(handle))
+    }
+
+    pub fn set_value(&self, value: u8) -> Result<(), gpio_cdev::Error> {
+        match self {
+            GpioPin::Gpiod(handle) => handle.set_value(value),
+            GpioPin::Sysfs(pin) => Ok(std::fs::write(
+                format!("/sys/class/gpio/gpio{}/value", pin),
+                format!("{}", value),
+            )?),
+        }
+    }
 }
