@@ -1,4 +1,7 @@
 pub mod helper;
+mod flasher;
+
+pub use flasher::{Flasher, FlashConfig};
 
 // https://www.st.com/resource/en/application_note/an3155-usart-protocol-used-in-the-stm32-bootloader-stmicroelectronics.pdf
 use std::io::prelude::*;
@@ -152,8 +155,15 @@ pub fn get_id<T: Read + Write>(port: &mut T) -> Result<u16, Error> {
 pub fn read_memory<T: Read + Write>(
     port: &mut T,
     address: u32,
-    num_bytes: u8,
-) -> Result<Vec<u8>, Error> {
+    dst_data: &mut [u8],
+) -> Result<(), Error> {
+    if dst_data.len() > 256 {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "Buffer size must be less than or equal to 256",
+        ));
+    }
+    let num_bytes = dst_data.len() as u8;
     // Send "Read Memory" command
     port.write(&READ_MEMORY_COMMAND)?;
 
@@ -195,9 +205,23 @@ pub fn read_memory<T: Read + Write>(
         ));
     }
 
-    let mut data = vec![0; num_bytes as usize];
-    port.read(&mut data)?;
+    port.read(dst_data)?;
 
+    Ok(())
+}
+
+pub fn read_memory_vec<T: Read + Write>(
+    port: &mut T,
+    address: u32,
+    num_bytes: usize,
+) -> Result<Vec<u8>, Error> {
+    let mut data = vec![0; num_bytes];
+    let mut offset = 0;
+    while offset < num_bytes {
+        let block_size = std::cmp::min(num_bytes - offset, 256);
+        read_memory(port, address + offset as u32, &mut data[offset..offset + block_size])?;
+        offset += block_size;
+    }
     Ok(data)
 }
 
@@ -291,6 +315,11 @@ pub fn write_memory<T: Read + Write>(port: &mut T, address: u32, data: &[u8]) ->
     let mut offset = 0;
     while offset < data.len() {
         let block_size = std::cmp::min(data.len() - offset, 256);
+        if data[offset..offset + block_size].iter().all(|&x| x == 0x00) {
+            log::debug!("skipping empty block at {:#x}", address + offset as u32);
+            offset += block_size;
+            continue;
+        }
         log::debug!("write to block: {:#x}", address + offset as u32);
         write_memory_block(
             port,

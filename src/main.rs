@@ -151,7 +151,7 @@ fn main() {
         Some(("read_memory", sub_m)) => {
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
             let size = sub_m.value_of("size").unwrap().parse().unwrap();
-            let res = read_memory(&mut port, address, size);
+            let res = read_memory_vec(&mut port, address, size);
             println!("Memory: {:?}", res);
         }
         Some(("go", sub_m)) => {
