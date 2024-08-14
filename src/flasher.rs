@@ -1,7 +1,9 @@
 use std::{thread::sleep, time::Duration};
 
 use crate::{
-    extended_erase_special, helper::{connect_port, toggle_reset, GpioPin}, read_memory, write_memory, SpecialEraseType
+    extended_erase_special,
+    helper::{connect_port, toggle_reset, GpioPin},
+    read_memory, write_memory, SpecialEraseType,
 };
 
 #[derive(Debug, Clone)]
@@ -13,7 +15,10 @@ pub struct FlashConfig {
     pub address: u32,
 }
 
-impl<T> From<T> for FlashConfig where T : Into<String> {
+impl<T> From<T> for FlashConfig
+where
+    T: Into<String>,
+{
     fn from(t: T) -> Self {
         FlashConfig {
             port: t.into(),
@@ -42,6 +47,15 @@ pub struct Flasher {
 }
 
 impl Flasher {
+    fn empty() -> Self {
+        Flasher {
+            config: FlashConfig::default(),
+            port: None,
+            gpio_boot: GpioPin::None,
+            gpio_reset: GpioPin::None,
+        }
+    }
+
     pub fn open(config: FlashConfig) -> Result<Self, std::io::Error> {
         log::debug!("Setting boot pin {}", config.boot_pin);
         let mut gpio_boot = GpioPin::new(config.boot_pin)?;
@@ -89,9 +103,10 @@ impl Flasher {
 
     pub fn reset(mut self) -> Result<(), std::io::Error> {
         log::debug!("Resetting boot pin");
-        self.gpio_boot.set_value(0)?;
-        toggle_reset(&mut self.gpio_reset)?;
-        Ok(())
+        let e1 = self.gpio_boot.set_value(0);
+        let e2 = toggle_reset(&mut self.gpio_reset);
+        std::mem::forget(self);
+        e1.and(e2)
     }
 
     pub fn read_memory(&mut self, address: u32, dst_data: &mut [u8]) -> Result<(), std::io::Error> {
@@ -100,5 +115,14 @@ impl Flasher {
             .as_mut()
             .ok_or(std::io::Error::other("Port not open"))?;
         read_memory(port, address, dst_data)
+    }
+}
+
+impl Drop for Flasher {
+    fn drop(&mut self) {
+        let f = std::mem::replace(self, Flasher::empty());
+        if let Err(e) = f.reset() {
+            log::error!("Error resetting flasher: {:?}", e);
+        }
     }
 }

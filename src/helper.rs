@@ -80,6 +80,7 @@ pub fn connect_port(
 }
 
 pub enum GpioPin {
+    None,
     Gpiod(LineHandle),
     Sysfs(u32),
 }
@@ -106,6 +107,7 @@ impl GpioPin {
 
     pub fn set_value(&mut self, value: u8) -> Result<(), std::io::Error> {
         match self {
+            GpioPin::None => Ok(()),
             GpioPin::Gpiod(handle) => handle.set_value(value).map_err(cdev_error_to_io_error),
             GpioPin::Sysfs(pin) => Ok(std::fs::write(
                 format!("/sys/class/gpio/gpio{}/value", pin),

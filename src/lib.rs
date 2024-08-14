@@ -1,7 +1,7 @@
-pub mod helper;
 mod flasher;
+pub mod helper;
 
-pub use flasher::{Flasher, FlashConfig};
+pub use flasher::{FlashConfig, Flasher};
 
 // https://www.st.com/resource/en/application_note/an3155-usart-protocol-used-in-the-stm32-bootloader-stmicroelectronics.pdf
 use std::io::prelude::*;
@@ -224,7 +224,11 @@ pub fn read_memory_vec<T: Read + Write>(
     let mut offset = 0;
     while offset < num_bytes {
         let block_size = std::cmp::min(num_bytes - offset, 256);
-        read_memory(port, address + offset as u32, &mut data[offset..offset + block_size])?;
+        read_memory(
+            port,
+            address + offset as u32,
+            &mut data[offset..offset + block_size],
+        )?;
         offset += block_size;
     }
     Ok(data)
