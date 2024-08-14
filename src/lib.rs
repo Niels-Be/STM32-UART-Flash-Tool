@@ -41,7 +41,8 @@ pub fn hello<T: Read + Write>(port: &mut T) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn get<T: Read + Write>(port: &mut T) -> Result<Vec<u8>, Error> {
+// Returns the version and supported commands
+pub fn get<T: Read + Write>(port: &mut T) -> Result<(u8, Vec<u8>), Error> {
     // Send "Get" command
     port.write(&GET_COMMAND)?;
 
@@ -61,7 +62,7 @@ pub fn get<T: Read + Write>(port: &mut T) -> Result<Vec<u8>, Error> {
 
     // Read number of bytes to follow
     port.read(&mut response)?;
-    let num_bytes = response[0] as usize;
+    let num_bytes = response[0] as usize + 1;
 
     log::trace!("num_bytes: {}", num_bytes);
 
@@ -78,10 +79,12 @@ pub fn get<T: Read + Write>(port: &mut T) -> Result<Vec<u8>, Error> {
         ));
     }
 
-    Ok(data)
+    let version = data[0];
+    let supported_commands = data[1..].to_vec();
+    Ok((version, supported_commands))
 }
 
-pub fn get_version<T: Read + Write>(port: &mut T) -> Result<(u8, Vec<u8>), Error> {
+pub fn get_version<T: Read + Write>(port: &mut T) -> Result<u8, Error> {
     // Send "Get Version" command
     port.write(&GET_VERSION_COMMAND)?;
 
@@ -111,9 +114,9 @@ pub fn get_version<T: Read + Write>(port: &mut T) -> Result<(u8, Vec<u8>), Error
     }
 
     let version = version_and_commands[0];
-    let commands = version_and_commands[1..].to_vec();
+    let _backwards_compatibility = &version_and_commands[1..];
 
-    Ok((version, commands))
+    Ok(version)
 }
 
 pub fn get_id<T: Read + Write>(port: &mut T) -> Result<u16, Error> {
@@ -178,10 +181,12 @@ pub fn read_memory<T: Read + Write>(
     }
 
     // Send address
-    let address_bytes = address.to_be_bytes();
-    let checksum = address_bytes.iter().fold(0xFF, |acc, &x| acc ^ x);
-    port.write(&address_bytes)?;
-    port.write(&[checksum])?;
+    let mut buf = Vec::with_capacity(5);
+    buf.extend_from_slice(&address.to_be_bytes());
+    let checksum = buf.iter().fold(0, |acc, &x| acc ^ x);
+    buf.push(checksum);
+    // log::trace!("address: {:?}", buf);
+    port.write(&buf)?;
 
     // Wait for ACK
     port.read(&mut response)?;
@@ -240,10 +245,12 @@ pub fn go<T: Read + Write>(port: &mut T, address: u32) -> Result<(), Error> {
     }
 
     // Send address
-    let address_bytes = address.to_be_bytes();
-    let checksum = address_bytes.iter().fold(0xFF, |acc, &x| acc ^ x);
-    port.write(&address_bytes)?;
-    port.write(&[checksum])?;
+    let mut buf = Vec::with_capacity(5);
+    buf.extend_from_slice(&address.to_be_bytes());
+    let checksum = buf.iter().fold(0, |acc, &x| acc ^ x);
+    buf.push(checksum);
+    // log::trace!("address: {:?}", buf);
+    port.write(&buf)?;
 
     // Wait for ACK
     port.read(&mut response)?;
