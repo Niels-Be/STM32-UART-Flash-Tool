@@ -103,9 +103,9 @@ impl Flasher {
 
     pub fn reset(mut self) -> Result<(), std::io::Error> {
         log::debug!("Resetting boot pin");
+        self.port.take(); // close port
         let e1 = self.gpio_boot.set_value(0);
         let e2 = toggle_reset(&mut self.gpio_reset);
-        std::mem::forget(self);
         e1.and(e2)
     }
 
@@ -120,9 +120,12 @@ impl Flasher {
 
 impl Drop for Flasher {
     fn drop(&mut self) {
-        let f = std::mem::replace(self, Flasher::empty());
-        if let Err(e) = f.reset() {
-            log::error!("Error resetting flasher: {:?}", e);
+        if self.port.is_some() {
+            // if its not already closed close it now
+            let f = std::mem::replace(self, Flasher::empty());
+            if let Err(e) = f.reset() {
+                log::error!("Error resetting flasher: {:?}", e);
+            }
         }
     }
 }
