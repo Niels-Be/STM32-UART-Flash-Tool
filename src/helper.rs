@@ -79,6 +79,16 @@ pub fn connect_port(
     Err(last_err)
 }
 
+
+pub fn reset_chip(config: FlashConfig) -> Result<(), std::io::Error> {
+    log::debug!("Resetting boot pin");
+    let mut gpio_boot = GpioPin::new(config.boot_pin)?;
+    gpio_boot.set_value(0)?;
+
+    let mut gpio_reset = GpioPin::new(config.reset_pin)?;
+    toggle_reset(&mut gpio_reset)
+}
+
 pub enum GpioPin {
     None,
     Gpiod(LineHandle),
