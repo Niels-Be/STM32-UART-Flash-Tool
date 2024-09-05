@@ -190,6 +190,7 @@ fn main() {
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
 
             // Note: this might time out for some reason, it does succeed anyway
+            println!("Erasing sectors");
             let res = extended_erase_special(&mut port, SpecialEraseType::MassErase);
             if let Err(e) = res {
                 println!("Reconnect after erase: {:?}", e);
@@ -200,7 +201,7 @@ fn main() {
                 port = connect_port(port_name, baud_rate).expect("Failed to connect");
             }
 
-            println!("Flashing {} at {}", file, address);
+            println!("Flashing {} at {:#010X}", file, address);
             let res = flash_file(&mut port, file, address);
             println!("Flash: {:?}", res);
         }
