@@ -64,7 +64,8 @@ pub fn connect_port(
         timeout: Duration::from_secs(1),
     };
 
-    let mut port = serialport::open_with_settings(port_name, &s)?;
+    let mut port = serialport::posix::TTYPort::open(std::path::Path::new(port_name), &s)?;
+    port.set_exclusive(true)?;
 
     let mut last_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "Failed to connect");
     for _ in 0..10 {
@@ -72,13 +73,12 @@ pub fn connect_port(
             last_err = e;
         } else {
             port.set_timeout(Duration::from_secs(20))?;
-            return Ok(port);
+            return Ok(Box::new(port));
         }
         sleep(Duration::from_millis(100));
     }
     Err(last_err)
 }
-
 
 pub fn reset_chip(config: FlashConfig) -> Result<(), std::io::Error> {
     log::debug!("Resetting boot pin");

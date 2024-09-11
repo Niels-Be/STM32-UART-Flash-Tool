@@ -160,13 +160,13 @@ pub fn read_memory<T: Read + Write>(
     address: u32,
     dst_data: &mut [u8],
 ) -> Result<(), Error> {
-    if dst_data.len() > 256 {
+    if dst_data.len() > 256 || dst_data.len() == 0 {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             "Buffer size must be less than or equal to 256",
         ));
     }
-    let num_bytes = dst_data.len() as u8;
+    let num_bytes = (dst_data.len() - 1) as u8;
     // Send "Read Memory" command
     port.write(&READ_MEMORY_COMMAND)?;
 
@@ -327,11 +327,11 @@ pub fn write_memory<T: Read + Write>(port: &mut T, address: u32, data: &[u8]) ->
     while offset < data.len() {
         let block_size = std::cmp::min(data.len() - offset, 256);
         if data[offset..offset + block_size].iter().all(|&x| x == 0x00) {
-            log::debug!("skipping empty block at {:#x}", address + offset as u32);
+            log::trace!("skipping empty block at {:#x}", address + offset as u32);
             offset += block_size;
             continue;
         }
-        log::debug!("write to block: {:#x}", address + offset as u32);
+        log::trace!("write to block: {:#x}", address + offset as u32);
         write_memory_block(
             port,
             address + offset as u32,
@@ -517,4 +517,73 @@ pub fn flash_file<T: Read + Write>(port: &mut T, file: &str, address: u32) -> Re
     write_memory(port, address, &data)?;
 
     Ok(())
+}
+
+pub fn verify_memory<T: Read + Write>(
+    port: &mut T,
+    address: u32,
+    data: &[u8],
+) -> Result<(), Error> {
+    for (i, chunk) in data.chunks(256).enumerate() {
+        let offset = i * 256;
+        let address = address + offset as u32;
+
+        if chunk.iter().all(|&x| x == 0x00) {
+            log::trace!("skipping empty block at {:#010X}", address as u32);
+            continue;
+        }
+        log::trace!("verify block: {:#x}", address);
+
+        for j in 0..3 {
+            match validate_block(port, chunk, address) {
+                Ok(_) => break,
+                Err(e) => {
+                    if j == 2 {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_block<T: Read + Write>(port: &mut T, chunk: &[u8], address: u32) -> Result<(), Error> {
+    let mut device_data_buf = [0; 256];
+    let mut device_data_vec;
+    let device_data = if chunk.len() == 256 {
+        read_memory(port, address, &mut device_data_buf)?;
+        &device_data_buf[..]
+    } else {
+        device_data_vec = vec![0; chunk.len()];
+        read_memory(port, address, &mut device_data_vec)?;
+        &device_data_vec[..]
+    };
+    Ok(
+        for (i, (a, b)) in device_data.iter().zip(chunk.iter()).enumerate() {
+            if a != b {
+                log::debug!("device: {:?}", &device_data[i.saturating_sub(12)..i + 12]);
+                log::debug!("data  : {:?}", &chunk[i.saturating_sub(12)..i + 12]);
+
+                log::debug!(
+                    "Mismatch at offset {:#010X}: expected {:#02x}, got {:#02x}",
+                    address,
+                    b,
+                    a
+                );
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    format!("Mismatch at {:#010X}", address + i as u32),
+                ));
+            }
+        },
+    )
+}
+
+pub fn verify_file<T: Read + Write>(port: &mut T, file: &str, address: u32) -> Result<(), Error> {
+    let mut file = std::fs::File::open(file)?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)?;
+
+    verify_memory(port, address, &data)
 }

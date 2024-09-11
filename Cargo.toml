@@ -5,12 +5,21 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+binary = ["dep:env_logger"]
+
+[[bin]]
+name = "stm32-firmware-loader"
+path = "src/main.rs"
+required-features = ["binary"]
+
 [lib]
 name = "stm32_firmware_loader"
 path = "src/lib.rs"
 
 [dependencies]
 clap = "^3"
+env_logger = { version="0.11", optional = true }
 gpio-cdev = "0.6"
 log = "0.4"
 parse_int = "0.6"

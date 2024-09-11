@@ -3,7 +3,7 @@ use std::{thread::sleep, time::Duration};
 use crate::{
     extended_erase_special,
     helper::{connect_port, toggle_reset, GpioPin},
-    read_memory, write_memory, SpecialEraseType,
+    read_memory, verify_memory, write_memory, SpecialEraseType,
 };
 
 #[derive(Debug, Clone)]
@@ -94,9 +94,11 @@ impl Flasher {
             port = self.port.as_mut().unwrap();
         }
 
-        log::debug!("Flashing {} bytes to {}", data.len(), self.config.address);
+        log::debug!("Flashing {} bytes to {:#010X}", data.len(), self.config.address);
         write_memory(port, self.config.address, data)?;
-        log::debug!("Flash Complete");
+        log::debug!("Writing done, verifying");
+        verify_memory(port, self.config.address, data)?;
+        log::debug!("Flash Successful");
         sleep(Duration::from_millis(100));
         Ok(())
     }

@@ -5,6 +5,11 @@ use stm32_firmware_loader::helper::{connect_port, toggle_reset, GpioPin};
 use stm32_firmware_loader::*;
 
 fn main() {
+    env_logger::builder()
+            .parse_filters("info,stm32_firmware_loader=debug")
+            .parse_default_env()
+            .try_init()
+            .expect("Could not init Logging System");
     let matches = App::new("STM32 Bootloader Utility")
         .version("1.0")
         .author("KBST GmbH <info@kbst-gmbh.de>")
@@ -70,6 +75,11 @@ fn main() {
         .subcommand(SubCommand::with_name("erase_ext_all"))
         .subcommand(
             SubCommand::with_name("write_file")
+                .arg(Arg::with_name("file").required(true))
+                .arg(Arg::with_name("address").default_value("0x08000000")),
+        )
+        .subcommand(
+            SubCommand::with_name("verify_file")
                 .arg(Arg::with_name("file").required(true))
                 .arg(Arg::with_name("address").default_value("0x08000000")),
         )
@@ -185,6 +195,12 @@ fn main() {
             let res = flash_file(&mut port, file, address);
             println!("Flash: {:?}", res);
         }
+        Some(("verify_file", sub_m)) => {
+            let file = sub_m.value_of("file").unwrap();
+            let address = parse(sub_m.value_of("address").unwrap()).unwrap();
+            let res = verify_file(&mut port, file, address);
+            println!("Verify: {:?}", res);
+        }
         Some(("flash", sub_m)) => {
             let file = sub_m.value_of("file").unwrap();
             let address = parse(sub_m.value_of("address").unwrap()).unwrap();
@@ -202,8 +218,16 @@ fn main() {
             }
 
             println!("Flashing {} at {:#010X}", file, address);
-            let res = flash_file(&mut port, file, address);
-            println!("Flash: {:?}", res);
+            if let Err(e) = flash_file(&mut port, file, address) {
+                println!("Error flashing: {:?}", e);
+            } else {
+                println!("Writing done, verifying");
+                if let Err(e) = verify_file(&mut port, file, address) {
+                    println!("Error verifying: {:?}", e);
+                } else {
+                    println!("Flash Successful");
+                }
+            }
         }
         Some(("reset", _)) => {
             // nothing to do
