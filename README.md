@@ -40,3 +40,10 @@ SUBCOMMANDS:
     read_memory            
     write_memory 
 ```
+
+### Building
+
+Building the binary for android:
+```
+cargo b --target=aarch64-linux-android -F binary
+```
