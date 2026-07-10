@@ -108,11 +108,13 @@ fn main() {
         .value_of("reset-pin")
         .map(|x| x.parse().expect("invalid reset pin"));
 
+    let is_reset = Some("reset") == matches.subcommand_name();
+    
     let mut gpio_boot = None;
     let mut gpio_reset = None;
     if boot_pin.is_some() || reset_pin.is_some() {
         if let Some(boot_pin) = boot_pin {
-            if boot_pin != 0 {
+            if boot_pin != 0 && !is_reset {
                 println!("Setting boot pin {}", boot_pin);
                 let mut boot = GpioPin::new(boot_pin).expect("Failed to request boot pin");
                 boot.set_value(1).expect("Failed to set boot pin");
@@ -131,13 +133,7 @@ fn main() {
         }
     }
 
-    if let Some("reset") = matches.subcommand_name() {
-        if let Some(gpio_boot) = &mut gpio_boot {
-            println!("Resetting boot pin");
-            gpio_boot.set_value(0).expect("Failed to reset boot pin");
-        }
-
-        toggle_reset_opt(&mut gpio_reset);
+    if is_reset {
         return;
     }
 
