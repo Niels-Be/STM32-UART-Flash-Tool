@@ -562,8 +562,8 @@ fn validate_block<T: Read + Write>(port: &mut T, chunk: &[u8], address: u32) -> 
     Ok(
         for (i, (a, b)) in device_data.iter().zip(chunk.iter()).enumerate() {
             if a != b {
-                log::debug!("device: {:?}", &device_data[i.saturating_sub(12)..i + 12]);
-                log::debug!("data  : {:?}", &chunk[i.saturating_sub(12)..i + 12]);
+                log::debug!("device: {:?}", &device_data[i.saturating_sub(12)..(i + 12).min(device_data.len())]);
+                log::debug!("data  : {:?}", &chunk[i.saturating_sub(12)..(i + 12).min(chunk.len())]);
 
                 log::debug!(
                     "Mismatch at offset {:#010X}: expected {:#02x}, got {:#02x}",
