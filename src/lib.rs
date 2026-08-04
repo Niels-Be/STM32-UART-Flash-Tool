@@ -23,13 +23,44 @@ const NACK: u8 = 0x1F;
 
 const HELLO_BYTE: u8 = 0x7F;
 
+fn read_exact_traced<T: Read>(port: &mut T, buf: &mut [u8]) -> Result<(), Error> {
+    let requested = buf.len();
+    let mut received = 0;
+
+    while received < requested {
+        let remaining = requested - received;
+        match port.read(&mut buf[received..]) {
+            Ok(0) => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedEof,
+                    format!("expected {} bytes, received {}", requested, received),
+                ));
+            }
+            Ok(n) => {
+                received += n;
+                log::trace!(
+                    "serial read: requested {} bytes, returned {} bytes ({}/{})",
+                    remaining,
+                    n,
+                    received,
+                    requested
+                );
+            }
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(())
+}
+
 pub fn hello<T: Read + Write>(port: &mut T) -> Result<(), Error> {
     // Send "Hello" byte
-    port.write(&[HELLO_BYTE])?;
+    port.write_all(&[HELLO_BYTE])?;
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -44,13 +75,13 @@ pub fn hello<T: Read + Write>(port: &mut T) -> Result<(), Error> {
 // Returns the version and supported commands
 pub fn get<T: Read + Write>(port: &mut T) -> Result<(u8, Vec<u8>), Error> {
     // Send "Get" command
-    port.write(&GET_COMMAND)?;
+    port.write_all(&GET_COMMAND)?;
 
     log::trace!("GET_COMMAND: {:?}", GET_COMMAND);
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -61,17 +92,17 @@ pub fn get<T: Read + Write>(port: &mut T) -> Result<(u8, Vec<u8>), Error> {
     log::trace!("read");
 
     // Read number of bytes to follow
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     let num_bytes = response[0] as usize + 1;
 
     log::trace!("num_bytes: {}", num_bytes);
 
     // Read data bytes
     let mut data = vec![0; num_bytes];
-    port.read_exact(&mut data)?;
+    read_exact_traced(port, &mut data)?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -86,11 +117,11 @@ pub fn get<T: Read + Write>(port: &mut T) -> Result<(u8, Vec<u8>), Error> {
 
 pub fn get_version<T: Read + Write>(port: &mut T) -> Result<u8, Error> {
     // Send "Get Version" command
-    port.write(&GET_VERSION_COMMAND)?;
+    port.write_all(&GET_VERSION_COMMAND)?;
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -101,10 +132,10 @@ pub fn get_version<T: Read + Write>(port: &mut T) -> Result<u8, Error> {
 
     // Read version and supported commands
     let mut version_and_commands = [0; 3];
-    port.read(&mut version_and_commands)?;
+    read_exact_traced(port, &mut version_and_commands)?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -121,11 +152,11 @@ pub fn get_version<T: Read + Write>(port: &mut T) -> Result<u8, Error> {
 
 pub fn get_id<T: Read + Write>(port: &mut T) -> Result<u16, Error> {
     // Send "Get ID" command
-    port.write(&GET_ID_COMMAND)?;
+    port.write_all(&GET_ID_COMMAND)?;
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -134,15 +165,15 @@ pub fn get_id<T: Read + Write>(port: &mut T) -> Result<u16, Error> {
     }
 
     // Read number of bytes to follow
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     let _num_bytes = response[0] as usize;
 
     // Read product ID
     let mut id_bytes = [0; 2];
-    port.read_exact(&mut id_bytes)?;
+    read_exact_traced(port, &mut id_bytes)?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -168,11 +199,11 @@ pub fn read_memory<T: Read + Write>(
     }
     let num_bytes = (dst_data.len() - 1) as u8;
     // Send "Read Memory" command
-    port.write(&READ_MEMORY_COMMAND)?;
+    port.write_all(&READ_MEMORY_COMMAND)?;
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -186,10 +217,10 @@ pub fn read_memory<T: Read + Write>(
     let checksum = buf.iter().fold(0, |acc, &x| acc ^ x);
     buf.push(checksum);
     // log::trace!("address: {:?}", buf);
-    port.write(&buf)?;
+    port.write_all(&buf)?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -199,10 +230,10 @@ pub fn read_memory<T: Read + Write>(
 
     // Send number of bytes to read and checksum
     let checksum = num_bytes ^ 0xFF;
-    port.write(&[num_bytes, checksum])?;
+    port.write_all(&[num_bytes, checksum])?;
 
     // Wait for ACK and read data
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -210,7 +241,7 @@ pub fn read_memory<T: Read + Write>(
         ));
     }
 
-    port.read(dst_data)?;
+    read_exact_traced(port, dst_data)?;
 
     Ok(())
 }
@@ -236,11 +267,11 @@ pub fn read_memory_vec<T: Read + Write>(
 
 pub fn go<T: Read + Write>(port: &mut T, address: u32) -> Result<(), Error> {
     // Send "Go" command
-    port.write(&GO_COMMAND)?;
+    port.write_all(&GO_COMMAND)?;
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -254,10 +285,10 @@ pub fn go<T: Read + Write>(port: &mut T, address: u32) -> Result<(), Error> {
     let checksum = buf.iter().fold(0, |acc, &x| acc ^ x);
     buf.push(checksum);
     // log::trace!("address: {:?}", buf);
-    port.write(&buf)?;
+    port.write_all(&buf)?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -274,11 +305,11 @@ pub fn write_memory_block<T: Read + Write>(
     data: &[u8],
 ) -> Result<(), Error> {
     // Send "Write Memory" command
-    port.write(&WRITE_MEMORY_COMMAND)?;
+    port.write_all(&WRITE_MEMORY_COMMAND)?;
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -292,10 +323,10 @@ pub fn write_memory_block<T: Read + Write>(
     let checksum = buf.iter().fold(0, |acc, &x| acc ^ x);
     buf.push(checksum);
     // log::trace!("address: {:?}", buf);
-    port.write(&buf)?;
+    port.write_all(&buf)?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -306,12 +337,12 @@ pub fn write_memory_block<T: Read + Write>(
     // Send number of bytes and data
     let length = (data.len() - 1) as u8; // Subtract 1 as per protocol
     let checksum = data.iter().fold(length, |acc, &x| acc ^ x);
-    port.write(&[length])?;
-    port.write(data)?;
-    port.write(&[checksum])?;
+    port.write_all(&[length])?;
+    port.write_all(data)?;
+    port.write_all(&[checksum])?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -344,11 +375,11 @@ pub fn write_memory<T: Read + Write>(port: &mut T, address: u32, data: &[u8]) ->
 
 pub fn erase_memory<T: Read + Write>(port: &mut T, sectors: &[u8]) -> Result<(), Error> {
     // Send "Erase Memory" command
-    port.write(&ERASE_MEMORY_COMMAND)?;
+    port.write_all(&ERASE_MEMORY_COMMAND)?;
 
     // Wait for ACK
     let mut response = [0; 1];
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -359,12 +390,12 @@ pub fn erase_memory<T: Read + Write>(port: &mut T, sectors: &[u8]) -> Result<(),
     // Send number of sectors and sector numbers
     let length = (sectors.len() - 1) as u8; // Subtract 1 as per protocol
     let checksum = sectors.iter().fold(length, |acc, &x| acc ^ x);
-    port.write(&[length])?;
-    port.write(sectors)?;
-    port.write(&[checksum])?;
+    port.write_all(&[length])?;
+    port.write_all(sectors)?;
+    port.write_all(&[checksum])?;
 
     // Wait for ACK
-    port.read(&mut response)?;
+    read_exact_traced(port, &mut response)?;
     if response[0] != ACK {
         return Err(Error::new(
             ErrorKind::Other,
@@ -377,11 +408,11 @@ pub fn erase_memory<T: Read + Write>(port: &mut T, sectors: &[u8]) -> Result<(),
 
 pub fn erase_memory_global<T: Read + Write>(port: &mut T) -> Result<(), Error> {
     // Send the "Global Erase" command
-    port.write(&ERASE_MEMORY_COMMAND)?;
+    port.write_all(&ERASE_MEMORY_COMMAND)?;
 
     // Wait for ACK
     let mut ack: [u8; 1] = [0];
-    port.read(&mut ack)?;
+    read_exact_traced(port, &mut ack)?;
 
     if ack[0] != ACK {
         return Err(Error::new(
@@ -392,10 +423,10 @@ pub fn erase_memory_global<T: Read + Write>(port: &mut T) -> Result<(), Error> {
 
     // Send the number of pages to erase. 0xFF00 means global erase.
     const GLOBAL_ERASE_PAGES: [u8; 2] = [0xFF, 0x00];
-    port.write(&GLOBAL_ERASE_PAGES)?;
+    port.write_all(&GLOBAL_ERASE_PAGES)?;
 
     // Wait for ACK
-    port.read(&mut ack)?;
+    read_exact_traced(port, &mut ack)?;
 
     if ack[0] != ACK {
         return Err(Error::new(
@@ -409,11 +440,11 @@ pub fn erase_memory_global<T: Read + Write>(port: &mut T) -> Result<(), Error> {
 
 pub fn extended_erase<T: Read + Write>(port: &mut T, pages: &[u16]) -> Result<(), Error> {
     // Command code for "Extended Erase" is 0x44
-    port.write(&EXTENDED_ERASE_MEMORY_COMMAND)?;
+    port.write_all(&EXTENDED_ERASE_MEMORY_COMMAND)?;
 
     // Wait for ACK
     let mut ack: [u8; 1] = [0];
-    port.read(&mut ack)?;
+    read_exact_traced(port, &mut ack)?;
 
     if ack[0] != ACK {
         return Err(Error::new(
@@ -434,11 +465,11 @@ pub fn extended_erase<T: Read + Write>(port: &mut T, pages: &[u16]) -> Result<()
     let checksum = bytes_to_send.iter().fold(0, |acc, &x| acc ^ x);
     bytes_to_send.push(checksum);
 
-    port.write(&bytes_to_send)?;
+    port.write_all(&bytes_to_send)?;
 
     // Wait for ACK
     log::debug!("wait for erase complete");
-    port.read(&mut ack)?;
+    read_exact_traced(port, &mut ack)?;
 
     if ack[0] != ACK {
         return Err(Error::new(
@@ -462,11 +493,11 @@ pub fn extended_erase_special<T: Read + Write>(
     cmd: SpecialEraseType,
 ) -> Result<(), Error> {
     // Send the "Extended Erase" command
-    port.write(&EXTENDED_ERASE_MEMORY_COMMAND)?;
+    port.write_all(&EXTENDED_ERASE_MEMORY_COMMAND)?;
 
     // Wait for ACK
     let mut ack: [u8; 1] = [0];
-    port.read(&mut ack)?;
+    read_exact_traced(port, &mut ack)?;
 
     if ack[0] != ACK {
         return Err(Error::new(
@@ -483,11 +514,11 @@ pub fn extended_erase_special<T: Read + Write>(
     let checksum = bytes_to_send.iter().fold(0, |acc, &x| acc ^ x);
     bytes_to_send.push(checksum);
 
-    port.write(&bytes_to_send)?;
+    port.write_all(&bytes_to_send)?;
 
     // Wait for ACK
     log::debug!("wait for erase complete");
-    port.read(&mut ack)?;
+    read_exact_traced(port, &mut ack)?;
 
     if ack[0] != ACK {
         return Err(Error::new(
