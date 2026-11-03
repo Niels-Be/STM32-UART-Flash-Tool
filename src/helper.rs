@@ -1,4 +1,7 @@
-use std::{thread::sleep, time::Duration};
+use std::{
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 use gpio_cdev::{Chip, LineHandle, LineRequestFlags};
 use serialport::prelude::*;
@@ -55,6 +58,12 @@ pub fn connect_port(
     port_name: &str,
     baud_rate: u32,
 ) -> Result<Box<dyn serialport::SerialPort>, std::io::Error> {
+    let started = Instant::now();
+    log::debug!(
+        "Opening bootloader serial port {} at {} baud (8E1, no flow control, hello I/O timeout 1s)",
+        port_name,
+        baud_rate
+    );
     let s = SerialPortSettings {
         baud_rate,
         data_bits: DataBits::Eight,
@@ -68,15 +77,29 @@ pub fn connect_port(
     port.set_exclusive(true)?;
 
     let mut last_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "Failed to connect");
-    for _ in 0..10 {
+    for attempt in 1..=10 {
         if let Err(e) = crate::hello(&mut port) {
+            log::debug!(
+                "Bootloader hello attempt {}/10 failed on {} after {:?}: {:?}",
+                attempt,
+                port_name,
+                started.elapsed(),
+                e
+            );
             last_err = e;
         } else {
             port.set_timeout(Duration::from_secs(20))?;
+            log::debug!(
+                "Bootloader connected on {} after {:?} (hello attempt {}/10, serial I/O timeout 20s)",
+                port_name,
+                started.elapsed(),
+                attempt
+            );
             return Ok(Box::new(port));
         }
         sleep(Duration::from_millis(100));
     }
+    log::debug!("Bootloader connection failed on {} after {:?}: {:?}", port_name, started.elapsed(), last_err);
     Err(last_err)
 }
 

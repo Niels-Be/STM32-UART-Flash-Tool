@@ -1,4 +1,7 @@
-use std::{thread::sleep, time::Duration};
+use std::{
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 use crate::{
     extended_erase_special,
@@ -78,37 +81,93 @@ impl Flasher {
     }
 
     pub fn flash(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
+        let started = Instant::now();
+        log::debug!(
+            "Flash attempt started: {} bytes at {:#010X}",
+            data.len(),
+            self.config.address
+        );
         let mut port = self
             .port
             .as_mut()
-            .ok_or(std::io::Error::other("Port not open"))?;
+            .ok_or_else(|| {
+                let e = std::io::Error::other("Port not open");
+                log::error!("Flash aborted: {}", e);
+                e
+            })?;
+        let erase_started = Instant::now();
+        log::debug!("Mass erase started");
         // Note: this might time out for some reason, it does succeed anyway
         let res = extended_erase_special(port, SpecialEraseType::MassErase);
         if let Err(e) = res {
-            log::debug!("Reconnect after erase: {:?}", e);
+            log::debug!(
+                "Mass erase failed after {:?}; resetting/reconnecting: {:?}",
+                erase_started.elapsed(),
+                e
+            );
             // close current port
             drop(self.port.take());
 
-            toggle_reset(&mut self.gpio_reset)?;
-            self.port = Some(connect_port(&self.config.port, self.config.baud_rate)?);
+            let reconnect_started = Instant::now();
+            toggle_reset(&mut self.gpio_reset).map_err(|e| {
+                log::error!("Flash aborted: post-erase reset failed after {:?}: {:?}", reconnect_started.elapsed(), e);
+                e
+            })?;
+            self.port = Some(connect_port(&self.config.port, self.config.baud_rate).map_err(|e| {
+                log::error!("Flash aborted: post-erase reconnect failed after {:?}: {:?}", reconnect_started.elapsed(), e);
+                e
+            })?);
             port = self.port.as_mut().unwrap();
+            log::debug!("Post-erase reset/reconnect completed after {:?}", reconnect_started.elapsed());
         }
+        log::debug!("Erase/recovery phase completed after {:?}", erase_started.elapsed());
 
         log::debug!("Flashing {} bytes to {:#010X}", data.len(), self.config.address);
-        write_memory(port, self.config.address, data)?;
-        log::debug!("Writing done, verifying");
-        verify_memory(port, self.config.address, data)?;
-        log::debug!("Flash Successful");
+        let write_started = Instant::now();
+        write_memory(port, self.config.address, data).map_err(|e| {
+            log::error!(
+                "Flash aborted: write failed after {:?} (attempt elapsed {:?}): {:?}",
+                write_started.elapsed(),
+                started.elapsed(),
+                e
+            );
+            e
+        })?;
+        log::debug!("Writing done after {:?}, verifying", write_started.elapsed());
+        let verify_started = Instant::now();
+        verify_memory(port, self.config.address, data).map_err(|e| {
+            log::error!(
+                "Flash aborted: verification failed after {:?} (attempt elapsed {:?}): {:?}",
+                verify_started.elapsed(),
+                started.elapsed(),
+                e
+            );
+            e
+        })?;
+        log::info!(
+            "Flash write/verification successful after {:?} (verification {:?})",
+            started.elapsed(),
+            verify_started.elapsed()
+        );
         sleep(Duration::from_millis(100));
         Ok(())
     }
 
     pub fn reset(mut self) -> Result<(), std::io::Error> {
+        let started = Instant::now();
         log::debug!("Resetting boot pin");
         self.port.take(); // close port
-        let e1 = self.gpio_boot.set_value(0);
-        let e2 = toggle_reset(&mut self.gpio_reset);
-        e1.and(e2)
+        let e1 = self.gpio_boot.set_value(0).map_err(|e| {
+            log::debug!("Clearing boot pin failed after {:?}: {:?}", started.elapsed(), e);
+            e
+        });
+        let e2 = toggle_reset(&mut self.gpio_reset).map_err(|e| {
+            log::debug!("Application reset failed after {:?}: {:?}", started.elapsed(), e);
+            e
+        });
+        let result = e1.and(e2);
+        log::debug!("Boot-pin clear/application reset finished after {:?}: {:?}", started.elapsed(), result);
+        result
     }
 
     pub fn read_memory(&mut self, address: u32, dst_data: &mut [u8]) -> Result<(), std::io::Error> {

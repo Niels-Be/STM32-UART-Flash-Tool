@@ -7,6 +7,7 @@ pub use flasher::{FlashConfig, Flasher};
 use std::io::prelude::*;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::time::Instant;
 
 const GET_COMMAND: [u8; 2] = [0x00, 0xFF];
 const GET_VERSION_COMMAND: [u8; 2] = [0x01, 0xFE];
@@ -31,6 +32,7 @@ fn read_exact_traced<T: Read>(port: &mut T, buf: &mut [u8]) -> Result<(), Error>
         let remaining = requested - received;
         match port.read(&mut buf[received..]) {
             Ok(0) => {
+                log::debug!("Serial read ended early: received {}/{} bytes", received, requested);
                 return Err(Error::new(
                     ErrorKind::UnexpectedEof,
                     format!("expected {} bytes, received {}", requested, received),
@@ -47,7 +49,10 @@ fn read_exact_traced<T: Read>(port: &mut T, buf: &mut [u8]) -> Result<(), Error>
                 );
             }
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
+            Err(e) => {
+                log::debug!("Serial read failed: received {}/{} bytes: {:?}", received, requested, e);
+                return Err(e);
+            }
         }
     }
 
@@ -354,8 +359,18 @@ pub fn write_memory_block<T: Read + Write>(
 }
 
 pub fn write_memory<T: Read + Write>(port: &mut T, address: u32, data: &[u8]) -> Result<(), Error> {
+    let started = Instant::now();
     let mut offset = 0;
     while offset < data.len() {
+        if offset != 0 && offset % (16 * 1024) == 0 {
+            log::debug!(
+                "Write progress: {}/{} image bytes processed at {:#010X}, elapsed {:?}",
+                offset,
+                data.len(),
+                address + offset as u32,
+                started.elapsed()
+            );
+        }
         let block_size = std::cmp::min(data.len() - offset, 256);
         if data[offset..offset + block_size].iter().all(|&x| x == 0x00) {
             log::trace!("skipping empty block at {:#x}", address + offset as u32);
@@ -367,9 +382,22 @@ pub fn write_memory<T: Read + Write>(port: &mut T, address: u32, data: &[u8]) ->
             port,
             address + offset as u32,
             &data[offset..offset + block_size],
-        )?;
+        )
+        .map_err(|e| {
+            log::warn!(
+                "Write failed at {:#010X}, block {} bytes, {}/{} image bytes processed, elapsed {:?}: {:?}",
+                address + offset as u32,
+                block_size,
+                offset,
+                data.len(),
+                started.elapsed(),
+                e
+            );
+            e
+        })?;
         offset += block_size;
     }
+    log::debug!("Write complete: {} image bytes processed in {:?}", offset, started.elapsed());
     Ok(())
 }
 
@@ -555,9 +583,19 @@ pub fn verify_memory<T: Read + Write>(
     address: u32,
     data: &[u8],
 ) -> Result<(), Error> {
+    let started = Instant::now();
     for (i, chunk) in data.chunks(256).enumerate() {
         let offset = i * 256;
         let address = address + offset as u32;
+        if offset != 0 && offset % (16 * 1024) == 0 {
+            log::debug!(
+                "Verify progress: {}/{} image bytes processed at {:#010X}, elapsed {:?}",
+                offset,
+                data.len(),
+                address,
+                started.elapsed()
+            );
+        }
 
         if chunk.iter().all(|&x| x == 0x00) {
             log::trace!("skipping empty block at {:#010X}", address as u32);
@@ -569,6 +607,17 @@ pub fn verify_memory<T: Read + Write>(
             match validate_block(port, chunk, address) {
                 Ok(_) => break,
                 Err(e) => {
+                    log::log!(
+                        if j == 2 { log::Level::Warn } else { log::Level::Debug },
+                        "Verify attempt {}/3 failed at {:#010X}, block {} bytes, {}/{} image bytes processed, elapsed {:?}: {:?}",
+                        j + 1,
+                        address,
+                        chunk.len(),
+                        offset,
+                        data.len(),
+                        started.elapsed(),
+                        e
+                    );
                     if j == 2 {
                         return Err(e);
                     }
@@ -576,6 +625,7 @@ pub fn verify_memory<T: Read + Write>(
             }
         }
     }
+    log::debug!("Verify complete: {} image bytes processed in {:?}", data.len(), started.elapsed());
     Ok(())
 }
 
